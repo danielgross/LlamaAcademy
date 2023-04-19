@@ -1,0 +1,10 @@
+Instruction: 
+This a messy passage from crawled API document of an API product, you need to filter this passage to a more concise passage around 600 words that satisfies following requirements:
+(1) Must contain the main content of the passage such as usage, implementation, purpose of the passage. 
+(2) (important) Must include important details related to the API call or usage such as endpoint to the API or support code to use the API. These could be very specific details such as NodeJS snippet or Python code or Curl command or REST API form or HTTPS call with their expected input and output. These details should be exact and mentioned in the passage. Do not make this up like don't generate Nodejs code if there is none in the passage. These details will be later used for a GPT3 model use them to generate usage code to implement the API, therefore they should be accurate.
+(3) Notes that, there could be many APIs in this passage. The filtered passage should contain all of them.
+
+Passage: 
+{passage}
+
+Filtered API reference:

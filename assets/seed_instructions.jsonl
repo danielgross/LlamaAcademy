@@ -1,0 +1,5 @@
+{"id": "seed_instruction_0", "instruction": "Create a custom dashboard that displays the latest pages and databases in your Notion account.", "url": "https://developers.notion.com/reference"}
+{"id": "seed_instruction_1", "instruction": "Use the Notion API to create a new block in a database.", "url": "https://developers.notion.com/reference"}
+{"id": "seed_instruction_2", "instruction": "Get me all the comments of a specific page", "url": "https://developers.notion.com/reference"}
+{"id": "seed_instruction_3", "instruction": "Create a Python function that imports a Markdown file's content into a new Notion page.", "url": "https://developers.notion.com/reference"}
+{"id": "seed_instruction_4", "instruction": "Get block children to the parent block", "url": "https://developers.notion.com/reference"}

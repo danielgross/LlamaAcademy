@@ -1,0 +1,37 @@
+name: sheep-tutor
+channels:
+  - conda-forge
+  - nvidia
+  - pytorch
+dependencies:
+  - python=3.10
+  - pytorch
+  - torchvision
+  - torchaudio 
+  - pytorch-cuda=11.6
+  - cuda
+  - pip
+  - pip:
+    - deepspeed
+    - accelerate
+    - sentencepiece
+    - git+https://github.com/huggingface/transformers.git
+    - datasets
+    - nltk
+    - openai
+    - rouge-score
+    - peft
+    - bs4
+    - langchain
+    - faiss-cpu
+    - tqdm
+    - bitsandbytes
+    - omegaconf
+    - langchain
+    - selenium
+    - lxml
+    - beautifulsoup4
+    - EdgeGPT
+    - fake_useragent
+    - tiktoken
+

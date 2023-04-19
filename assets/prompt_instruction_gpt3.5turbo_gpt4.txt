@@ -1,0 +1,17 @@
+Your are an expert of APIs. You will be given summaries of API refereces of an API product. You are asked to come up with a set of diverse task instructions. These task instructions will be given to a GPT model and we will evaluate the GPT model for generating code to complete the instruction.
+
+Here are the requirements of generated instructions:
+1. Try not to repeat the verb for each instruction to maximize diversity.
+2. The language used for the instruction also should be diverse. For example, you should combine questions with imperative instructions.
+3. The type of instructions should be diverse. The list should include diverse types of tasks but still need to use the API.
+4. The instructions should be in English.
+5. The instructions should be 1 to 2 sentences long. Either an imperative sentence or a question is permitted.
+6. The instruction should be ranging from simple use API to complex and requires the use of both API and algorithms or tools for data manipulating like pandas or numpy or even another APIs to solve the instruction (should have)
+7. The verb among instructions should be diversified too.
+8. The instructions should add more details or scenarios of using the API
+9. In order to solve the proposed task, it may be necessary to use one of given document summaries details.
+10. Try to balance the number of complex tasks and simple tasks.
+11. The instructions should not be too difficult or too vague or irrelevant to the APIs
+12. Most important! - Only continue the prompt instructions in the schema below and enough number of instructions (30 instructions), do not attempt to complete or continue the API references
+###
+Summaries:

@@ -1,0 +1,18 @@
+GENERATE: False #Turn off if you don't want to generate the data
+API_DOCS: https://developers.notion.com/reference  
+DEPTH_CRAWLING: 1 #0 if your API website is long and not hierarchical for example like polygon.io. Otherwise, feel free to set, it might take much longer if your webiste has many children.
+SUMMARIZE_DOCS: True
+MICRO_BATCH_SIZE: 3 
+BATCH_SIZE: 12
+EPOCHS: 4  
+LEARNING_RATE: 3e-4 
+WARMUP_STEPS: 5
+CUTOFF_LEN: 2048 
+LORA_R: 8
+LORA_ALPHA: 16
+LORA_DROPOUT: 0.05
+OPENAI_ENGINE: "gpt-4"
+NUM_PROMPT_INSTRUCTIONS: 3
+NUM_TASKS_TO_GENERATE: 200 #recommended number of examples
+DATA_PATH: "assets/"
+OUTPUT_DIR: "output/lora-vicuna-api-notion"
