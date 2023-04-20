@@ -19,7 +19,7 @@ conda env create --file=environment.yaml
 conda env config vars set OPENAI_API_KEY=YOUR_API_KEY
 ```
 ## Usage
-LlamaAcademy uses simple interface by abstracting every user hyper-parameters with configuration file
+LlamaAcademy uses simple interface by abstracting every user hyper-parameters with configuration file.
 ```yaml
 GENERATE: True # Turn off if you don't want to generate the data
 API_DOCS: https://developers.notion.com/reference 
@@ -57,25 +57,25 @@ This code is tested with 1 RTX A6000 instance in vast.ai (approximated 0.6$/1h).
 The fine-tuning is done after 20 minutes with 100 examples, the data generation is completed after 1 hour (most of the time spent in GPT-4 instances generation and crawling process due to screen scraping is quite expensive).
 
 ## Plan
-- [ ] Implement (IA)^3 for few-shot fine-tuning
-- [ ] Implement flash_attention
-- [ ] Implement scratch-pad based GPT-4 agent to generate multi-turn planning and generating code
+- [ ] Implement (IA)^3 for few-shot fine-tuning.
+- [ ] Implement flash_attention.
+- [ ] Implement scratch-pad based GPT-4 agent to generate multi-turn planning and generating code.
 
 ## Code Files
 This repository provides the following Folders and Files
-- `assets/`: The folder contains seed tasks + training URLs to generate the data (see self-instruct for more information)
-    - `data.json`: generated data will be saved here for training
-    - `generated_instructions.jsonl`: generated instructions for instruction tuning will be saved here
-    - `training_urls.json`: common API for crawling and generating the training data (other direction)
-    - `seed_tasks.json`: human written seed tasks for self-instruct process (4-10 examples are recommended)
-    - `prompt_summary.txt`: prompt for GPT3.5-turbo extract and summarize the crawled API documents
-    - `prompt_input_code.txt`: prompt for GPT4 generate code with references queried from vectorstore
-- `configs/`: The folder for the configuration files
-- `chain.py`: The file for custom Langchain pipeline and agents
-- `data_gen.py`: The file implementing data generation using GPT3.5, GPT4, Bing with different strategies
-- `main.py`: The main inteference file for user to customize their Alpaca to API references (scraping API references website, generating instruction-code pairs and fine-tuning Vicuna) 
-- `inference.py`: Allow user to inference with a trained model with a query related to the API (using Langchain + LlamaAcademy)
-- `environment.yaml`: The file for the dependencies
-- `utils.py`: The file for the helper functions
-- `memorizing.py`: (Still under construction) Using [memory fine-tuning method](https://arxiv.org/pdf/2203.08913.pdf) to force Vicuna to memorize API references without pre-training
-- `ingest_docs.py`: Implementing API references crawling using Elinks and Selenium
+- `assets/`: The folder contains seed tasks + training URLs to generate the data (see self-instruct for more information).
+    - `data.json`: generated data will be saved here for training.
+    - `generated_instructions.jsonl`: generated instructions for instruction tuning will be saved here.
+    - `training_urls.json`: common API for crawling and generating the training data (other direction).
+    - `seed_tasks.json`: human written seed tasks for self-instruct process (4-10 examples are recommended).
+    - `prompt_summary.txt`: prompt for GPT3.5-turbo extract and summarize the crawled API documents.
+    - `prompt_input_code.txt`: prompt for GPT4 generate code with references queried from the vector score.
+- `configs/`: The folder for the configuration files.
+- `chain.py`: The file for custom Langchain pipeline and agents.
+- `data_gen.py`: The file implementing data generation using GPT3.5, GPT4, Bing with different strategies.
+- `main.py`: The main inteference file for user to customize their Alpaca to API references (scraping API references website, generating instruction-code pairs and fine-tuning Vicuna).
+- `inference.py`: Allow user to inference with a trained model with a query related to the API (using Langchain + LlamaAcademy).
+- `environment.yaml`: The file for the dependencies.
+- `utils.py`: The file for the helper functions.
+- `memorizing.py`: (Still under construction) Using [memory fine-tuning method](https://arxiv.org/pdf/2203.08913.pdf) to force Vicuna to memorize API references without pre-training.
+- `ingest_docs.py`: Implementing API references crawling using Elinks and Selenium.
