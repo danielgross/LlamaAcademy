@@ -53,8 +53,8 @@ To run inference with LangChain
 python3 inference.py --model_folder output/lora-vicuna-api-notion
 ```
 ### Hardware requirements
-This code is tested with 1 RTX A6000 instance in vast.ai (approximated 0.6$/1h). The peak VRAM is 27.8 gb, therefore, any GPU with VRAM > 30gb will safe for fine-tuning.
-The fine-tuning is done after 20 minutes with 100 examples, the data generation for polygon is completed after 1 hour (most of the time spent in GPT-4 instances generation and crawling process due to screen scraping is quite expensive).
+This code is tested with 1 RTX A6000 instance in vast.ai (approximated 0.6$/1h). The peak VRAM is 27.8 GB, therefore, any GPU with VRAM > 30GB will safe for fine-tuning.
+The fine-tuning is done after 20 minutes with 100 examples, the data generation is completed after 1 hour (most of the time spent in GPT-4 instances generation and crawling process due to screen scraping is quite expensive).
 
 ## Plan
 - [ ] Implement (IA)^3 for few-shot fine-tuning
