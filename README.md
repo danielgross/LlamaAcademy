@@ -21,9 +21,9 @@ conda env config vars set OPENAI_API_KEY=YOUR_API_KEY
 ## Usage
 LlamaAcademy uses simple interface by abstracting every user hyper-parameters with configuration file
 ```yaml
-GENERATE: True #Turn off if you don't want to generate the data
+GENERATE: True # Turn off if you don't want to generate the data
 API_DOCS: https://developers.notion.com/reference 
-DEPTH_CRAWLING: 1 #0 if your API website is long and not hierarchical for example polygon.io. Otherwise, feel free to set, it might take much longer if your webiste has many children.
+DEPTH_CRAWLING: 1 # 0 if your API website is long and not hierarchical for example polygon.io. Otherwise, feel free to set, it might take much longer if your webiste has many children.
 SUMMARIZE_DOCS: True
 MICRO_BATCH_SIZE: 3  
 BATCH_SIZE: 12
@@ -36,7 +36,7 @@ LORA_ALPHA: 16
 LORA_DROPOUT: 0.05
 OPENAI_ENGINE: "gpt-4"
 NUM_PROMPT_INSTRUCTIONS: 3
-NUM_TASKS_TO_GENERATE: 200 #recommended number of examples
+NUM_TASKS_TO_GENERATE: 200 # Recommended number of examples
 DATA_PATH: "assets/"
 OUTPUT_DIR: "output/lora-vicuna-api-notion"
 ```
