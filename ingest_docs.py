@@ -175,7 +175,7 @@ class APIReferenceLoader(WebBaseLoader):
         with open("/tmp/struct.html", "w") as f:
             f.write(response.text)
         os.system("elinks --dump /tmp/struct.html > /tmp/struct.txt")
-        with open("/tmp/struct.txt", "r") as f:
+        with open("/tmp/struct.txt", "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
         text = "".join(lines)
         return text
