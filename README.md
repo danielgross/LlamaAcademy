@@ -40,15 +40,15 @@ NUM_TASKS_TO_GENERATE: 200 # Recommended number of examples
 DATA_PATH: "assets/"
 OUTPUT_DIR: "output/lora-vicuna-api-notion"
 ```
-To run the fine-tuning process, run
+To run the fine-tuning process, run:
 ```bash
 CUDA_VISIBLE_DEVICES=0 python3 main.py --config configs/vicuna_13b.yaml
 ```
-After the training, run export LoRA model to HuggingFace weights by
+After the training, run export LoRA model to HuggingFace weights by doing this:
 ```bash
 python3 export_hf.py --base_model jeffwan/vicuna-13b --model_folder output/lora-vicuna-api-notion
 ```
-To run inference with LangChain
+To run inference with LangChain:
 ```bash
 python3 inference.py --model_folder output/lora-vicuna-api-notion
 ```
