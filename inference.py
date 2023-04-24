@@ -6,9 +6,6 @@ from utils import generate_stream as generate_stream_func
 import argparse
 import os.path as osp
 
-alpaca_api_template = """As a helper for user to use API of your product, you need to generate the example code according to the user instruction. You can use following relevant documents to help you generate the code.
-{few_shot_samples} \nAPI References: {context} \nInstruction:{instruction} \nCode:"""
-
 def args_parse():
     parser = argparse.ArgumentParser(description='Inference with AlpacaAPI')
     parser.add_argument('--model_folder', type=str, required=True)
@@ -33,49 +30,6 @@ class SimpleChatIO:
                 pre = now
         print(" ".join(outputs[pre:]), flush=True)
         return " ".join(outputs)
-
-def base_inference(query,
-                   model,
-                   tokenizer,
-                   temperature=0.1,
-                   top_p=0.75,
-                   top_k=40,
-                   num_beams=2,
-                   max_new_tokens=1024
-                   ):
-
-    with open("assets/vectorstore.pkl", "rb") as f:
-        vectorstore = pkl.load(f)
-    docs = vectorstore.similarity_search(query, k=1)
-
-    prompt = f"""Below is an instruction that describes a task, paired with an input that provides further context. Generate the code that appropriately completes the request
-    ### Instruction:
-    {query}
-    ### Input:
-    {docs}
-    ### Response:
-    """
-
-    inputs = tokenizer(prompt, return_tensors="pt")
-    input_ids = inputs["input_ids"].cuda()
-
-    generation_config = GenerationConfig(
-        temperature=temperature,
-        top_p=top_p,
-        top_k=top_k,
-        num_beams=num_beams
-    )
-    with torch.no_grad():
-        generation_output = model.generate(
-            input_ids=input_ids,
-            generation_config=generation_config,
-            return_dict_in_generate=True,
-            output_scores=True,
-            max_new_tokens=max_new_tokens,
-        )
-    s = generation_output.sequences[0]
-    output = tokenizer.decode(s)
-    return output.split("### Response:")[1].strip()
 
 def vicuna_chat(model_name, device, num_gpus, load_8bit=False, debug=False):
     prefix = """Below is an instruction that describes a task, paired with an API references that provides further about the API. Write code that appropriately completes the request.\n\n### Instruction:\n """
