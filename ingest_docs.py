@@ -21,6 +21,8 @@ import os
 import re
 import tqdm
 import time
+import luigi
+from luigi.util import inherits
 
 class APIReferenceLoader(WebBaseLoader):
     """
@@ -306,12 +308,41 @@ def ingest_docs(url_docs: str, recursive_depth: int = 1, return_summary: bool = 
 
     return documents, docs_for_summary
 
+
+class IngestDocumentsTask(luigi.Task):
+    url_docs = luigi.Parameter()
+    recursive_depth = luigi.IntParameter(default=1)
+
+    def output(self):
+        return luigi.LocalTarget("assets/documents.pkl"), luigi.LocalTarget("assets/docs_for_summary.pkl")
+
+    def run(self):
+        logger = logging.getLogger(__name__)
+        docs, docs_for_summary = ingest_docs(self.url_docs, self.recursive_depth, logger=logger)
+        with self.output()[0].open("wb") as f:
+            pickle.dump(docs, f)
+        with self.output()[1].open("wb") as f:
+            pickle.dump(docs_for_summary, f)
+
+
+@inherits(IngestDocumentsTask)
+class SaveVectorStoreTask(luigi.Task):
+
+    def requires(self):
+        return self.clone(IngestDocumentsTask)
+
+    def output(self):
+        return luigi.LocalTarget("assets/vectorstore.pkl")
+
+    def run(self):
+        with self.input()[0].open("rb") as f:
+            docs = pickle.load(f)
+
+        embeddings = OpenAIEmbeddings()
+        vectorstore = FAISS.from_documents(docs, embeddings)
+
+        with self.output().open("wb") as f:
+            pickle.dump(vectorstore, f)
+
 if __name__ == "__main__":
-    import logging
-    logger = logging.getLogger(__name__)
-    docs, docs_for_summary = ingest_docs("https://developers.notion.com/reference/create-a-token", recursive_depth=0, logger=logger)
-    embeddings = OpenAIEmbeddings()
-    vectorstore = FAISS.from_documents(docs, embeddings)
-    with open("assets/vectorstore_debug.pkl", "wb") as f:
-        pickle.dump(vectorstore, f)
-    
+    luigi.build([SaveVectorStoreTask("https://developers.notion.com/reference/create-a-token", recursive_depth=0)], local_scheduler=True)
