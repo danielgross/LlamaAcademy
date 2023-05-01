@@ -10,9 +10,11 @@ import openai
 import tqdm
 import asyncio
 import tiktoken
+import luigi
 from langchain.docstore.document import Document
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores.faiss import FAISS
+from ingest_docs import IngestDocumentsTask, SaveVectorStoreTask
 
 def post_process_response_ins(strategy, response, **kwargs):
     """
@@ -429,43 +431,18 @@ def launch_instruction_generation(
 
     return machine_instructions
 
-def launch_CoT_generation():
-    return NotImplementedError("This method is not yet implemented")
 
-def launch_data_generation(
-    url_docs,
+def generate_machine_output_data(
+    generated_instructions,
     documents_embeds,
-    output_dir="assets/",
-    num_tasks_to_generate=140,
-    strategy_instruct="summarizing-gpt-3.5-turbo-generating-gpt-4",
-    model_name_code="gpt-4",
-    num_docs_to_output=1,
-    use_scraped_docs=True,
-    temperature=0.7,
-    top_p=1.0,
-    max_tokens=500,
-    logger=None,
+    model_name_code,
+    url_docs,
+    use_scraped_docs,
+    num_docs_to_output,
+    max_tokens,
+    logger,
     **kwargs
-):
-
-    generated_instructions = launch_instruction_generation(
-        url_docs,
-        strategy=strategy_instruct,
-        num_instructions_to_generate=num_tasks_to_generate,
-        temperature=temperature,
-        top_p=top_p,
-        logger=logger,
-        **kwargs
-    )
-    # generated_instructions = []
-    # with open(os.path.join(output_dir, "generated_instructions.jsonl"), "r") as f:
-    #     for line in f:
-    #         generated_instructions.append(json.loads(line.strip()))
-    with open(os.path.join(output_dir, "generated_instructions.jsonl"), "w") as f:
-        for instruction in generated_instructions:
-            f.write(json.dumps(instruction) + "\n")
-    
-    logger.info("Completed Instruction Generation")
+        ):
     machine_output_data = []
     for instruction in tqdm.tqdm(generated_instructions):
         data = {"instruction": instruction["instruction"],
@@ -516,8 +493,62 @@ def launch_data_generation(
             )
         data["output"] = post_process_response_code(code, model_name_code)
         machine_output_data.append(data)
-        machine_output_data_vicuna = utils.convert_vicuna(machine_output_data)
-        utils.jdump(machine_output_data_vicuna, os.path.join(output_dir, "data.json"))
+        return machine_output_data
+
+def launch_CoT_generation():
+    return NotImplementedError("This method is not yet implemented")
+
+def launch_data_generation(
+    url_docs,
+    documents_embeds,
+    output_dir="assets/",
+    num_tasks_to_generate=140,
+    strategy_instruct="summarizing-gpt-3.5-turbo-generating-gpt-4",
+    model_name_code="gpt-4",
+    num_docs_to_output=1,
+    use_scraped_docs=True,
+    temperature=0.7,
+    top_p=1.0,
+    max_tokens=500,
+    logger=None,
+    **kwargs
+):
+
+    generated_instructions = launch_instruction_generation(
+        url_docs,
+        strategy=strategy_instruct,
+        num_instructions_to_generate=num_tasks_to_generate,
+        temperature=temperature,
+        top_p=top_p,
+        logger=logger,
+        **kwargs
+    )
+    # generated_instructions = []
+    # with open(os.path.join(output_dir, "generated_instructions.jsonl"), "r") as f:
+    #     for line in f:
+    #         generated_instructions.append(json.loads(line.strip()))
+    with open(os.path.join(output_dir, "generated_instructions.jsonl"), "w") as f:
+        for instruction in generated_instructions:
+            f.write(json.dumps(instruction) + "\n")
+    
+    logger.info("Completed Instruction Generation")
+
+    machine_output_data = generate_machine_output_data(
+        generated_instructions=generated_instructions,
+        documents_embeds=documents_embeds,
+        model_name_code=model_name_code,
+        url_docs=url_docs,
+        use_scraped_docs=use_scraped_docs,
+        num_docs_to_output=num_docs_to_output,
+        max_tokens=max_tokens,
+        logger=logger,
+        **kwargs
+    )
+    machine_output_data_vicuna = utils.convert_vicuna(machine_output_data)
+    utils.jdump(machine_output_data_vicuna, os.path.join(output_dir, "data.json"))
+    logger.info("Completed Machine Output Data Generation")
+
+
 
 def unit_test():
     import logging
@@ -544,6 +575,68 @@ def unit_test():
         num_prompt_instructions=3,
         documents_for_summary=docs_for_summary
     )
+
+
+class LaunchDataGenerationTask(luigi.Task):
+    url_docs = luigi.Parameter()
+    recursive_depth = luigi.IntParameter(default=1)
+    output_dir = luigi.Parameter(default="assets/")
+    num_tasks_to_generate = luigi.IntParameter(default=140)
+    strategy_instruct = luigi.Parameter(default="summarizing-gpt-3.5-turbo-generating-gpt-4")
+    model_name_code = luigi.Parameter(default="gpt-4")
+    num_docs_to_output = luigi.IntParameter(default=1)
+    use_scraped_docs = luigi.BoolParameter(default=True)
+    temperature = luigi.FloatParameter(default=0.7)
+    top_p = luigi.FloatParameter(default=1.0)
+    max_tokens = luigi.IntParameter(default=500)
+    logger = logging.getLogger(__name__)
+    # Additional parameters if needed
+    # ...
+
+    def requires(self):
+        # Define dependencies here, e.g., IngestDocumentsTask and SaveVectorStoreTask
+        return {
+            'ingest': IngestDocumentsTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth),
+            'save': SaveVectorStoreTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
+        }
+
+    def output(self):
+        return {
+                'data': luigi.LocalTarget(os.path.join(self.output_dir, "data_{}.json".format(self.task_id))),
+                'instructions': luigi.LocalTarget(os.path.join(self.output_dir, "general_instructions_{}.jsonl".format(self.task_id))),
+                }
+
+    def run(self):
+        self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
+        # Load the required data from the previous tasks
+        with self.input()['ingest']['docs_for_summary'].open("rb") as f:
+            documents_for_summary = pickle.load(f)
+        with self.input()['save'].open("rb") as f:
+            vectorstore = pickle.load(f)
+
+        kwargs = {"documents_for_summary": documents_for_summary, "summary_embeds": True}
+
+        # Call the launch_data_generation function
+        launch_data_generation(
+            url_docs=self.url_docs,
+            documents_embeds=vectorstore,
+            output_dir=self.output_dir,
+            num_tasks_to_generate=self.num_tasks_to_generate,
+            strategy_instruct=self.strategy_instruct,
+            model_name_code=self.model_name_code,
+            num_docs_to_output=self.num_docs_to_output,
+            use_scraped_docs=self.use_scraped_docs,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            max_tokens=self.max_tokens,
+            logger=self.logger,
+            **kwargs
+        )
+
+        # Mark the task as complete
+        with self.output().open('w') as out_file:
+            out_file.write('Data generation complete\n')
+
 
 if __name__ == "__main__":
     unit_test()
