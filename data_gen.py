@@ -498,6 +498,7 @@ def generate_machine_output_data(
 def launch_CoT_generation():
     return NotImplementedError("This method is not yet implemented")
 
+
 def launch_data_generation(
     url_docs,
     documents_embeds,
@@ -513,7 +514,6 @@ def launch_data_generation(
     logger=None,
     **kwargs
 ):
-
     generated_instructions = launch_instruction_generation(
         url_docs,
         strategy=strategy_instruct,
@@ -549,7 +549,6 @@ def launch_data_generation(
     logger.info("Completed Machine Output Data Generation")
 
 
-
 def unit_test():
     import logging
     from ingest_docs import ingest_docs
@@ -577,7 +576,63 @@ def unit_test():
     )
 
 
-class LaunchDataGenerationTask(luigi.Task):
+class LaunchInstructionGeneration(luigi.Task):
+    url_docs = luigi.Parameter()
+    output_dir = luigi.Parameter(default="assets/")
+    num_tasks_to_generate = luigi.IntParameter(default=140)
+    strategy_instruct = luigi.Parameter(default="summarizing-gpt-3.5-turbo-generating-gpt-4")
+    temperature = luigi.FloatParameter(default=0.7)
+    top_p = luigi.FloatParameter(default=1.0)
+    logger = logging.getLogger(__name__)
+
+    def output(self):
+        return luigi.LocalTarget(os.path.join(self.output_dir, "generated_instructions.jsonl"))
+
+    def run(self):
+        generated_instructions = launch_instruction_generation(
+            url_docs=self.url_docs,
+            strategy=self.strategy_instruct,
+            num_instructions_to_generate=self.num_tasks_to_generate,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            logger=self.logger,
+        )
+
+        with self.output().open("w") as f:
+            for instruction in generated_instructions:
+                f.write(json.dumps(instruction) + "\n")
+
+class LaunchMachineOutputData(luigi.Task):
+    documents_embeds = luigi.Parameter()
+    generated_instructions = luigi.ListParameter()
+    model_name_code = luigi.Parameter(default="gpt-4")
+    url_docs = luigi.Parameter()
+    use_scraped_docs = luigi.BoolParameter(default=True)
+    num_docs_to_output = luigi.IntParameter(default=1)
+    max_tokens = luigi.IntParameter(default=500)
+    logger = logging.getLogger(__name__)
+
+    def output(self):
+        return luigi.LocalTarget("assets/data.json")
+
+    def run(self):
+        machine_output_data = generate_machine_output_data(
+            generated_instructions=self.generated_instructions,
+            documents_embeds=self.documents_embeds,
+            model_name_code=self.model_name_code,
+            url_docs=self.url_docs,
+            use_scraped_docs=self.use_scraped_docs,
+            num_docs_to_output=self.num_docs_to_output,
+            max_tokens=self.max_tokens,
+            logger=self.logger,
+        )
+
+        machine_output_data_vicuna = utils.convert_vicuna(machine_output_data)
+
+        with self.output().open("w") as f:
+            json.dump(machine_output_data_vicuna, f)
+
+class LaunchDataGeneration(luigi.Task):
     url_docs = luigi.Parameter()
     recursive_depth = luigi.IntParameter(default=1)
     output_dir = luigi.Parameter(default="assets/")
@@ -590,52 +645,50 @@ class LaunchDataGenerationTask(luigi.Task):
     top_p = luigi.FloatParameter(default=1.0)
     max_tokens = luigi.IntParameter(default=500)
     logger = logging.getLogger(__name__)
-    # Additional parameters if needed
-    # ...
 
     def requires(self):
-        # Define dependencies here, e.g., IngestDocumentsTask and SaveVectorStoreTask
-        return {
-            'ingest': IngestDocumentsTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth),
-            'save': SaveVectorStoreTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
-        }
+        return IngestDocs(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
 
     def output(self):
         return {
-                'data': luigi.LocalTarget(os.path.join(self.output_dir, "data_{}.json".format(self.task_id))),
-                'instructions': luigi.LocalTarget(os.path.join(self.output_dir, "general_instructions_{}.jsonl".format(self.task_id))),
-                }
+            'generated_instructions': luigi.LocalTarget(os.path.join(self.output_dir, "generated_instructions.jsonl")),
+            'machine_output_data': luigi.LocalTarget(os.path.join(self.output_dir, "data.json"))
+        }
 
     def run(self):
-        self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
-        # Load the required data from the previous tasks
-        with self.input()['ingest']['docs_for_summary'].open("rb") as f:
-            documents_for_summary = pickle.load(f)
-        with self.input()['save'].open("rb") as f:
-            vectorstore = pickle.load(f)
+        input_data = self.input()
+        import pdb;pdb.set_trace()
+        documents_embeds = input_data['save'].path
 
-        kwargs = {"documents_for_summary": documents_for_summary, "summary_embeds": True}
+        task = LaunchInstructionGeneration(url_docs=self.url_docs,
+                                           output_dir=self.output_dir,
+                                           num_tasks_to_generate=self.num_tasks_to_generate,
+                                           strategy_instruct=self.strategy_instruct,
+                                           temperature=self.temperature,
+                                           top_p=self.top_p)
+        yield task
 
-        # Call the launch_data_generation function
-        launch_data_generation(
-            url_docs=self.url_docs,
-            documents_embeds=vectorstore,
-            output_dir=self.output_dir,
-            num_tasks_to_generate=self.num_tasks_to_generate,
-            strategy_instruct=self.strategy_instruct,
-            model_name_code=self.model_name_code,
-            num_docs_to_output=self.num_docs_to_output,
-            use_scraped_docs=self.use_scraped_docs,
-            temperature=self.temperature,
-            top_p=self.top_p,
-            max_tokens=self.max_tokens,
-            logger=self.logger,
-            **kwargs
-        )
+        generated_instructions_path = task.output().path
 
-        # Mark the task as complete
-        with self.output().open('w') as out_file:
-            out_file.write('Data generation complete\n')
+        with open(generated_instructions_path, "r") as f:
+            generated_instructions = [json.loads(line.strip()) for line in f]
+
+        self.logger.info("Completed Instruction Generation")
+
+        task = LaunchMachineOutputData(documents_embeds=documents_embeds,
+                                       generated_instructions=generated_instructions,
+                                       model_name_code=self.model_name_code,
+                                       url_docs=self.url_docs,
+                                       use_scraped_docs=self.use_scraped_docs,
+                                       num_docs_to_output=self.num_docs_to_output,
+                                       max_tokens=self.max_tokens)
+        yield task
+
+        machine_output_data_vicuna = task.output().path
+
+        self.logger.info("Completed Machine Output Data Generation")
+
+
 
 
 if __name__ == "__main__":
