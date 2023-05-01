@@ -1,4 +1,5 @@
 import os
+import logging
 import time
 import utils
 import json
@@ -10,9 +11,12 @@ import openai
 import tqdm
 import asyncio
 import tiktoken
+import luigi
+from luigi.util import inherits
 from langchain.docstore.document import Document
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores.faiss import FAISS
+from ingest_docs import IngestDocs, INGEST_DOCUMENTS_TASK, SAVE_VECTOR_STORE_TASK, INGEST_DOCUMENTS_TASK__DOCUMENTS, INGEST_DOCUMENTS_TASK__DOCS_FOR_SUMMARY
 
 def post_process_response_ins(strategy, response, **kwargs):
     """
@@ -295,6 +299,7 @@ def launch_instruction_generation(
     temperature=0.7,
     top_p=0.7,
     logger=None,
+    vectorstore_summary_path="assets/vectorstore_summary.pkl",
     **kwargs
 ):
     request_idx = 0
@@ -334,7 +339,7 @@ def launch_instruction_generation(
         vectorstore = FAISS.from_documents(embed_docs, embeddings)
         
         logger.info("Summary Vectorstore is storing in assets/vectorstore_summary.pkl")
-        with open("assets/vectorstore_summary.pkl", "wb") as f:
+        with open(vectorstore_summary_path, "wb") as f:
             pickle.dump(vectorstore, f)
             
         logger.info("Summarizing mode ends")
@@ -429,43 +434,18 @@ def launch_instruction_generation(
 
     return machine_instructions
 
-def launch_CoT_generation():
-    return NotImplementedError("This method is not yet implemented")
 
-def launch_data_generation(
-    url_docs,
+def generate_machine_output_data(
+    generated_instructions,
     documents_embeds,
-    output_dir="assets/",
-    num_tasks_to_generate=140,
-    strategy_instruct="summarizing-gpt-3.5-turbo-generating-gpt-4",
-    model_name_code="gpt-4",
-    num_docs_to_output=1,
-    use_scraped_docs=True,
-    temperature=0.7,
-    top_p=1.0,
-    max_tokens=500,
-    logger=None,
+    model_name_code,
+    url_docs,
+    use_scraped_docs,
+    num_docs_to_output,
+    max_tokens,
+    logger,
     **kwargs
-):
-
-    generated_instructions = launch_instruction_generation(
-        url_docs,
-        strategy=strategy_instruct,
-        num_instructions_to_generate=num_tasks_to_generate,
-        temperature=temperature,
-        top_p=top_p,
-        logger=logger,
-        **kwargs
-    )
-    # generated_instructions = []
-    # with open(os.path.join(output_dir, "generated_instructions.jsonl"), "r") as f:
-    #     for line in f:
-    #         generated_instructions.append(json.loads(line.strip()))
-    with open(os.path.join(output_dir, "generated_instructions.jsonl"), "w") as f:
-        for instruction in generated_instructions:
-            f.write(json.dumps(instruction) + "\n")
-    
-    logger.info("Completed Instruction Generation")
+        ):
     machine_output_data = []
     for instruction in tqdm.tqdm(generated_instructions):
         data = {"instruction": instruction["instruction"],
@@ -516,8 +496,61 @@ def launch_data_generation(
             )
         data["output"] = post_process_response_code(code, model_name_code)
         machine_output_data.append(data)
-        machine_output_data_vicuna = utils.convert_vicuna(machine_output_data)
-        utils.jdump(machine_output_data_vicuna, os.path.join(output_dir, "data.json"))
+        return machine_output_data
+
+def launch_CoT_generation():
+    return NotImplementedError("This method is not yet implemented")
+
+
+def launch_data_generation(
+    url_docs,
+    documents_embeds,
+    output_dir="assets/",
+    num_tasks_to_generate=140,
+    strategy_instruct="summarizing-gpt-3.5-turbo-generating-gpt-4",
+    model_name_code="gpt-4",
+    num_docs_to_output=1,
+    use_scraped_docs=True,
+    temperature=0.7,
+    top_p=1.0,
+    max_tokens=500,
+    logger=None,
+    **kwargs
+):
+    generated_instructions = launch_instruction_generation(
+        url_docs,
+        strategy=strategy_instruct,
+        num_instructions_to_generate=num_tasks_to_generate,
+        temperature=temperature,
+        top_p=top_p,
+        logger=logger,
+        **kwargs
+    )
+    # generated_instructions = []
+    # with open(os.path.join(output_dir, "generated_instructions.jsonl"), "r") as f:
+    #     for line in f:
+    #         generated_instructions.append(json.loads(line.strip()))
+    with open(os.path.join(output_dir, "generated_instructions.jsonl"), "w") as f:
+        for instruction in generated_instructions:
+            f.write(json.dumps(instruction) + "\n")
+    
+    logger.info("Completed Instruction Generation")
+
+    machine_output_data = generate_machine_output_data(
+        generated_instructions=generated_instructions,
+        documents_embeds=documents_embeds,
+        model_name_code=model_name_code,
+        url_docs=url_docs,
+        use_scraped_docs=use_scraped_docs,
+        num_docs_to_output=num_docs_to_output,
+        max_tokens=max_tokens,
+        logger=logger,
+        **kwargs
+    )
+    machine_output_data_vicuna = utils.convert_vicuna(machine_output_data)
+    utils.jdump(machine_output_data_vicuna, os.path.join(output_dir, "data.json"))
+    logger.info("Completed Machine Output Data Generation")
+
 
 def unit_test():
     import logging
@@ -545,5 +578,117 @@ def unit_test():
         documents_for_summary=docs_for_summary
     )
 
+
+# --- luigi ---
+
+GENERATED_INSTRUCTIONS = 'generated_instructions'
+VECTORSTORE_SUMMARY = 'vectorstore_summary'
+LAUNCH_INSTRUCTION_GENERATION_TASK = 'launch_instruction_generation_task'
+
+
+class LaunchInstructionGeneration(luigi.Task):
+    url_docs = luigi.Parameter()
+    recursive_depth = luigi.IntParameter(default=1)
+    output_dir = luigi.Parameter(default="assets/")
+    num_tasks_to_generate = luigi.IntParameter(default=140)
+    strategy_instruct = luigi.Parameter(default="summarizing-gpt-3.5-turbo-generating-gpt-4")
+    temperature = luigi.FloatParameter(default=0.7)
+    top_p = luigi.FloatParameter(default=1.0)
+    num_prompt_instructions = luigi.IntParameter(default=3)
+    logger = logging.getLogger(__name__)
+
+    def output(self):
+        return {
+                GENERATED_INSTRUCTIONS: luigi.LocalTarget(os.path.join(self.output_dir, "generated_instructions_{}.jsonl".format(self.task_id))),
+                VECTORSTORE_SUMMARY: luigi.LocalTarget(os.path.join(self.output_dir, "vectorstore_summary_{}.pkl".format(self.task_id))),
+                }
+
+    def requires(self):
+        return IngestDocs(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
+
+    def run(self):
+        self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
+
+        input_data = self.input()
+
+        docs_for_summary_loader = input_data[INGEST_DOCUMENTS_TASK][INGEST_DOCUMENTS_TASK__DOCS_FOR_SUMMARY]
+
+        with docs_for_summary_loader.open("rb") as f:
+            docs_for_summary = pickle.load(f)
+
+        generated_instructions = launch_instruction_generation(
+            url_docs=self.url_docs,
+            strategy=self.strategy_instruct,
+            num_instructions_to_generate=self.num_tasks_to_generate,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            logger=self.logger,
+            documents_for_summary=docs_for_summary,
+            vectorstore_summary_path=self.output()[VECTORSTORE_SUMMARY].path,
+            num_prompt_instructions=self.num_prompt_instructions
+        )
+
+        with self.output()[GENERATED_INSTRUCTIONS].open("w") as f:
+            for instruction in generated_instructions:
+                f.write(json.dumps(instruction) + "\n")
+
+@inherits(LaunchInstructionGeneration)
+class LaunchMachineOutputData(luigi.Task):
+    url_docs = luigi.Parameter()
+    recursive_depth = luigi.IntParameter(default=1)
+    model_name_code = luigi.Parameter(default="gpt-4")
+    use_scraped_docs = luigi.BoolParameter(default=True)
+    num_docs_to_output = luigi.IntParameter(default=1)
+    max_tokens = luigi.IntParameter(default=500)
+    logger = logging.getLogger(__name__)
+
+    def requires(self):
+        return {
+                INGEST_DOCUMENTS_TASK: IngestDocs(url_docs=self.url_docs, recursive_depth=self.recursive_depth),
+                LAUNCH_INSTRUCTION_GENERATION_TASK: LaunchInstructionGeneration(
+                    url_docs=self.url_docs, 
+                    recursive_depth=self.recursive_depth,
+                    output_dir=self.output_dir,
+                    num_tasks_to_generate=self.num_tasks_to_generate,
+                    strategy_instruct=self.strategy_instruct,
+                    temperature=self.temperature,
+                    top_p=self.top_p
+                    )
+        }
+
+    def output(self):
+        return luigi.LocalTarget(os.path.join(self.output_dir, "data_{}.json".format(self.task_id)))
+
+    def run(self):
+        self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
+
+        generated_instructions_path = self.input()[LAUNCH_INSTRUCTION_GENERATION_TASK][GENERATED_INSTRUCTIONS].path
+        with open(generated_instructions_path, "r") as f:
+            generated_instructions = [json.loads(line.strip()) for line in f]
+        documents_vectorstore_loader = self.input()[INGEST_DOCUMENTS_TASK][SAVE_VECTOR_STORE_TASK]
+        with documents_vectorstore_loader.open("rb") as f:
+            documents_vectorstore = pickle.load(f)
+
+        machine_output_data = generate_machine_output_data(
+            generated_instructions=generated_instructions,
+            documents_embeds=documents_vectorstore,
+            model_name_code=self.model_name_code,
+            url_docs=self.url_docs,
+            use_scraped_docs=self.use_scraped_docs,
+            num_docs_to_output=self.num_docs_to_output,
+            max_tokens=self.max_tokens,
+            logger=self.logger,
+        )
+
+        machine_output_data_vicuna = utils.convert_vicuna(machine_output_data)
+
+        with self.output().open("w") as f:
+            json.dump(machine_output_data_vicuna, f)
+
 if __name__ == "__main__":
-    unit_test()
+    task = LaunchMachineOutputData(
+            url_docs='https://developers.notion.com/reference',
+            recursive_depth=0,
+            model_name_code='gpt-3.5-turbo'
+        )
+    luigi.build([task], local_scheduler=True)
