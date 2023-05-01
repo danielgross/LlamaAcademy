@@ -12,6 +12,7 @@ import tqdm
 import asyncio
 import tiktoken
 import luigi
+from luigi.util import inherits
 from langchain.docstore.document import Document
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores.faiss import FAISS
@@ -298,7 +299,7 @@ def launch_instruction_generation(
     temperature=0.7,
     top_p=0.7,
     logger=None,
-    vectorstore_summary_path="assets/vectorstore_summary.pkl"
+    vectorstore_summary_path="assets/vectorstore_summary.pkl",
     **kwargs
 ):
     request_idx = 0
@@ -581,7 +582,8 @@ def unit_test():
 # --- luigi ---
 
 GENERATED_INSTRUCTIONS = 'generated_instructions'
-VECTORSTORE_SUMMARYY = 'vectorstore_summary'
+VECTORSTORE_SUMMARY = 'vectorstore_summary'
+LAUNCH_INSTRUCTION_GENERATION_TASK = 'launch_instruction_generation_task'
 
 
 class LaunchInstructionGeneration(luigi.Task):
@@ -592,6 +594,7 @@ class LaunchInstructionGeneration(luigi.Task):
     strategy_instruct = luigi.Parameter(default="summarizing-gpt-3.5-turbo-generating-gpt-4")
     temperature = luigi.FloatParameter(default=0.7)
     top_p = luigi.FloatParameter(default=1.0)
+    num_prompt_instructions = luigi.IntParameter(default=3)
     logger = logging.getLogger(__name__)
 
     def output(self):
@@ -621,7 +624,8 @@ class LaunchInstructionGeneration(luigi.Task):
             top_p=self.top_p,
             logger=self.logger,
             documents_for_summary=docs_for_summary,
-            vectorstore_summary_path=self.output()[VECTORSTORE_SUMMARY].path
+            vectorstore_summary_path=self.output()[VECTORSTORE_SUMMARY].path,
+            num_prompt_instructions=self.num_prompt_instructions
         )
 
         with self.output()[GENERATED_INSTRUCTIONS].open("w") as f:
@@ -641,7 +645,7 @@ class LaunchMachineOutputData(luigi.Task):
     def requires(self):
         return {
                 INGEST_DOCUMENTS_TASK: IngestDocs(url_docs=self.url_docs, recursive_depth=self.recursive_depth),
-                GENERATED_INSTRUCTIONS: LaunchInstructionGeneration(
+                LAUNCH_INSTRUCTION_GENERATION_TASK: LaunchInstructionGeneration(
                     url_docs=self.url_docs, 
                     recursive_depth=self.recursive_depth,
                     output_dir=self.output_dir,
@@ -653,15 +657,15 @@ class LaunchMachineOutputData(luigi.Task):
         }
 
     def output(self):
-        return luigi.LocalTarget(os.path.join(self.output_dir, "assets/data_{}.json".format(self.task_id))
+        return luigi.LocalTarget(os.path.join(self.output_dir, "data_{}.json".format(self.task_id)))
 
     def run(self):
         self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
 
-        generated_instructions_path = self.input()[GENERATED_INSTRUCTIONS].path
+        generated_instructions_path = self.input()[LAUNCH_INSTRUCTION_GENERATION_TASK][GENERATED_INSTRUCTIONS].path
         with open(generated_instructions_path, "r") as f:
             generated_instructions = [json.loads(line.strip()) for line in f]
-        documents_vectorstore_loader = self.input()['docs_ingestion'][SAVE_VECTOR_STORE_TASK]
+        documents_vectorstore_loader = self.input()[INGEST_DOCUMENTS_TASK][SAVE_VECTOR_STORE_TASK]
         with documents_vectorstore_loader.open("rb") as f:
             documents_vectorstore = pickle.load(f)
 
@@ -684,6 +688,7 @@ class LaunchMachineOutputData(luigi.Task):
 if __name__ == "__main__":
     task = LaunchMachineOutputData(
             url_docs='https://developers.notion.com/reference',
-            recursive_depth=1,
+            recursive_depth=0,
+            model_name_code='gpt-3.5-turbo'
         )
     luigi.build([task], local_scheduler=True)
