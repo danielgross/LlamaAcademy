@@ -586,13 +586,13 @@ VECTORSTORE_SUMMARYY = 'vectorstore_summary'
 
 class LaunchInstructionGeneration(luigi.Task):
     url_docs = luigi.Parameter()
+    recursive_depth = luigi.IntParameter(default=1)
     output_dir = luigi.Parameter(default="assets/")
     num_tasks_to_generate = luigi.IntParameter(default=140)
     strategy_instruct = luigi.Parameter(default="summarizing-gpt-3.5-turbo-generating-gpt-4")
     temperature = luigi.FloatParameter(default=0.7)
     top_p = luigi.FloatParameter(default=1.0)
     logger = logging.getLogger(__name__)
-    documents_for_summary = luigi.Parameter()
 
     def output(self):
         return {
@@ -600,8 +600,19 @@ class LaunchInstructionGeneration(luigi.Task):
                 VECTORSTORE_SUMMARY: luigi.LocalTarget(os.path.join(self.output_dir, "vectorstore_summary_{}.pkl".format(self.task_id))),
                 }
 
+    def requires(self):
+        return IngestDocs(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
+
     def run(self):
         self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
+
+        input_data = self.input()
+
+        docs_for_summary_loader = input_data[INGEST_DOCUMENTS_TASK][INGEST_DOCUMENTS_TASK__DOCS_FOR_SUMMARY]
+
+        with docs_for_summary_loader.open("rb") as f:
+            docs_for_summary = pickle.load(f)
+
         generated_instructions = launch_instruction_generation(
             url_docs=self.url_docs,
             strategy=self.strategy_instruct,
@@ -609,7 +620,7 @@ class LaunchInstructionGeneration(luigi.Task):
             temperature=self.temperature,
             top_p=self.top_p,
             logger=self.logger,
-            documents_for_summary=self.documents_for_summary,
+            documents_for_summary=docs_for_summary,
             vectorstore_summary_path=self.output()[VECTORSTORE_SUMMARY].path
         )
 
@@ -617,24 +628,46 @@ class LaunchInstructionGeneration(luigi.Task):
             for instruction in generated_instructions:
                 f.write(json.dumps(instruction) + "\n")
 
+@inherits(LaunchInstructionGeneration)
 class LaunchMachineOutputData(luigi.Task):
-    documents_embeds = luigi.Parameter()
-    generated_instructions = luigi.ListParameter()
-    model_name_code = luigi.Parameter(default="gpt-4")
     url_docs = luigi.Parameter()
+    recursive_depth = luigi.IntParameter(default=1)
+    model_name_code = luigi.Parameter(default="gpt-4")
     use_scraped_docs = luigi.BoolParameter(default=True)
     num_docs_to_output = luigi.IntParameter(default=1)
     max_tokens = luigi.IntParameter(default=500)
     logger = logging.getLogger(__name__)
+
+    def requires(self):
+        return {
+                INGEST_DOCUMENTS_TASK: IngestDocs(url_docs=self.url_docs, recursive_depth=self.recursive_depth),
+                GENERATED_INSTRUCTIONS: LaunchInstructionGeneration(
+                    url_docs=self.url_docs, 
+                    recursive_depth=self.recursive_depth,
+                    output_dir=self.output_dir,
+                    num_tasks_to_generate=self.num_tasks_to_generate,
+                    strategy_instruct=self.strategy_instruct,
+                    temperature=self.temperature,
+                    top_p=self.top_p
+                    )
+        }
 
     def output(self):
         return luigi.LocalTarget(os.path.join(self.output_dir, "assets/data_{}.json".format(self.task_id))
 
     def run(self):
         self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
+
+        generated_instructions_path = self.input()[GENERATED_INSTRUCTIONS].path
+        with open(generated_instructions_path, "r") as f:
+            generated_instructions = [json.loads(line.strip()) for line in f]
+        documents_vectorstore_loader = self.input()['docs_ingestion'][SAVE_VECTOR_STORE_TASK]
+        with documents_vectorstore_loader.open("rb") as f:
+            documents_vectorstore = pickle.load(f)
+
         machine_output_data = generate_machine_output_data(
-            generated_instructions=self.generated_instructions,
-            documents_embeds=self.documents_embeds,
+            generated_instructions=generated_instructions,
+            documents_embeds=documents_vectorstore,
             model_name_code=self.model_name_code,
             url_docs=self.url_docs,
             use_scraped_docs=self.use_scraped_docs,
@@ -648,74 +681,8 @@ class LaunchMachineOutputData(luigi.Task):
         with self.output().open("w") as f:
             json.dump(machine_output_data_vicuna, f)
 
-class LaunchDataGeneration(luigi.Task):
-    url_docs = luigi.Parameter()
-    recursive_depth = luigi.IntParameter(default=1)
-    output_dir = luigi.Parameter(default="assets/")
-    num_tasks_to_generate = luigi.IntParameter(default=140)
-    strategy_instruct = luigi.Parameter(default="summarizing-gpt-3.5-turbo-generating-gpt-4")
-    model_name_code = luigi.Parameter(default="gpt-4")
-    num_docs_to_output = luigi.IntParameter(default=1)
-    use_scraped_docs = luigi.BoolParameter(default=True)
-    temperature = luigi.FloatParameter(default=0.7)
-    top_p = luigi.FloatParameter(default=1.0)
-    max_tokens = luigi.IntParameter(default=500)
-    logger = logging.getLogger(__name__)
-
-    def requires(self):
-        docs_ingestion_task = IngestDocs(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
-        instructions_generation_task = LaunchInstructionGeneration(url_docs=self.url_docs,
-                                                                   output_dir=self.output_dir,
-                                                                   num_tasks_to_generate=self.num_tasks_to_generate,
-                                                                   strategy_instruct=self.strategy_instruct,
-                                                                   temperature=self.temperature,
-                                                                   top_p=self.top_p,
-                                                                   documents_for_summary=None)
-        machine_output_task = LaunchMachineOutputData(documents_embeds=None,
-                                                      generated_instructions=None,
-                                                      model_name_code=self.model_name_code,
-                                                      url_docs=self.url_docs,
-                                                      use_scraped_docs=self.use_scraped_docs,
-                                                      num_docs_to_output=self.num_docs_to_output,
-                                                      max_tokens=self.max_tokens)
-        return {'docs_ingestion': docs_ingestion_task, 'instructions_generation': instructions_generation_task, 'machine_output': machine_output_task}
-
-
-    def output(self):
-        self.input()
-
-    def run(self):
-        input_data = self.input()
-
-        docs_for_summary_loader = input_data['docs_ingestion'][INGEST_DOCUMENTS_TASK][INGEST_DOCUMENTS_TASK__DOCS_FOR_SUMMARY]
-        with docs_for_summary_loader.open("rb") as f:
-            docs_for_summary = pickle.load(f)
-
-        task = self.input()['instructions_generation']
-        task.documents_for_summary = docs_for_summary
-        yield task
-
-        generated_instructions_path = task.output().path
-        self.logger.info("Completed Instruction Generation")
-
-        with open(generated_instructions_path, "r") as f:
-            generated_instructions = [json.loads(line.strip()) for line in f]
-
-        documents_vectorstore_loader = input_data['docs_ingestion'][SAVE_VECTOR_STORE_TASK]
-        with documents_vectorstore_loader.open("rb") as f:
-            documents_vectorstore = pickle.load(f)
-
-        task = self.input()['machine_output']
-        task.documents_embeds = documents_vectorstore
-        task.generated_instructions = generated_instructions
-        yield task
-
-        self.logger.info("Completed Machine Output Data Generation")
-
-
-
 if __name__ == "__main__":
-    task = LaunchDataGeneration(
+    task = LaunchMachineOutputData(
             url_docs='https://developers.notion.com/reference',
             recursive_depth=1,
         )
