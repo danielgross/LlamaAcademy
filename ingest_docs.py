@@ -22,6 +22,7 @@ import re
 import tqdm
 import time
 import luigi
+import logging
 from luigi.util import inherits
 
 class APIReferenceLoader(WebBaseLoader):
@@ -312,13 +313,15 @@ def ingest_docs(url_docs: str, recursive_depth: int = 1, return_summary: bool = 
 class IngestDocumentsTask(luigi.Task):
     url_docs = luigi.Parameter()
     recursive_depth = luigi.IntParameter(default=1)
+    logger = logging.getLogger(__name__)
 
     def output(self):
-        return luigi.LocalTarget("assets/documents.pkl"), luigi.LocalTarget("assets/docs_for_summary.pkl")
+        return luigi.LocalTarget("assets/documents_{}.pkl".format(self.task_id), luigi.LocalTarget("assets/docs_for_summary_{}.pkl".format(self.task_id)))
 
     def run(self):
-        logger = logging.getLogger(__name__)
-        docs, docs_for_summary = ingest_docs(self.url_docs, self.recursive_depth, logger=logger)
+        self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
+        self.logger.info(self.task_id)
+        docs, docs_for_summary = ingest_docs(self.url_docs, self.recursive_depth, logger=self.logger)
         with self.output()[0].open("wb") as f:
             pickle.dump(docs, f)
         with self.output()[1].open("wb") as f:
@@ -332,9 +335,10 @@ class SaveVectorStoreTask(luigi.Task):
         return self.clone(IngestDocumentsTask)
 
     def output(self):
-        return luigi.LocalTarget("assets/vectorstore.pkl")
+        return luigi.LocalTarget("assets/vectorstore_{}.pkl".format(self.task_id))
 
     def run(self):
+        self.logger.info(self.task_id)
         with self.input()[0].open("rb") as f:
             docs = pickle.load(f)
 
