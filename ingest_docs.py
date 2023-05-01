@@ -13,6 +13,7 @@ from selenium import webdriver
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
+from selenium.common.exceptions import WebDriverException, InvalidSessionIdException
 import contextlib
 import lxml.html as LH
 import lxml.html.clean as clean
@@ -22,6 +23,7 @@ import re
 import tqdm
 import time
 import luigi
+from luigi.worker import Worker
 import logging
 from luigi.util import inherits
 
@@ -167,6 +169,7 @@ class APIReferenceLoader(WebBaseLoader):
                     texts.append(words)
             return " ".join(texts)
 
+
     def scrape_structured_elements(self, url):
         """
         Scrape the structured elements of the page using text-based web browser Elinks.
@@ -289,17 +292,22 @@ def ingest_docs(url_docs: str, recursive_depth: int = 1, return_summary: bool = 
     logger.info(f"Crawling {docs_link} ...")
     # Iterate over the collected links
     for link in tqdm.tqdm(docs_link):
-        # Initialize an APIReferenceLoader with the option to scrape visible content
-        loader = APIReferenceLoader(link, is_visible_scrape=True)
-        # Load the raw documents
-        raw_documents = loader.load()
-        # Initialize text splitters for documents and summaries
-        text_splitter = TokenTextSplitter(chunk_size=1200, chunk_overlap=150)
-        text_splitter_sum = TokenTextSplitter(chunk_size=3100, chunk_overlap=300)
-        # Split documents for summary and document lists
-        if return_summary:
-            docs_for_summary.extend(text_splitter_sum.split_documents(raw_documents))
-        documents.extend(text_splitter.split_documents(raw_documents))
+        try:
+            logging.info(link)
+            # Initialize an APIReferenceLoader with the option to scrape visible content
+            loader = APIReferenceLoader(link, is_visible_scrape=True)
+            # Load the raw documents
+            raw_documents = loader.load()
+            # Initialize text splitters for documents and summaries
+            text_splitter = TokenTextSplitter(chunk_size=1200, chunk_overlap=150)
+            text_splitter_sum = TokenTextSplitter(chunk_size=3100, chunk_overlap=300)
+            # Split documents for summary and document lists
+            if return_summary:
+                docs_for_summary.extend(text_splitter_sum.split_documents(raw_documents))
+            documents.extend(text_splitter.split_documents(raw_documents))
+        except Exception as e:
+            logging.warning("Failed to scrape {}".format(link))
+            logging.warning(e)
     logger.info("Number of documents: {}".format(len(documents)))
     
     logger.info("Saving vectorstore into assets/vectorstore.pkl")
@@ -314,6 +322,8 @@ class IngestDocumentsTask(luigi.Task):
     url_docs = luigi.Parameter()
     recursive_depth = luigi.IntParameter(default=1)
     logger = logging.getLogger(__name__)
+    retry_count = 5
+    retry_delay = 10
 
     def output(self):
         return {
@@ -352,6 +362,25 @@ class SaveVectorStoreTask(luigi.Task):
         with self.output().open("wb") as f:
             pickle.dump(vectorstore, f)
 
+class IngestDocs(luigi.Task):
+    url_docs = luigi.Parameter()
+    recursive_depth = luigi.IntParameter(default=1)
+
+    def requires(self):
+        return {
+            'ingest': IngestDocumentsTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth),
+            'save': SaveVectorStoreTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
+        }
+
+    def run(self):
+        pass  
+
+    def output(self):
+        return self.input()  
+
 
 if __name__ == "__main__":
-    luigi.build([SaveVectorStoreTask("https://developers.notion.com/reference/create-a-token", recursive_depth=0)], local_scheduler=True)
+    luigi.build(
+	[IngestDocs("https://developers.notion.com/reference", recursive_depth=1)],
+	local_scheduler=True,
+    )
