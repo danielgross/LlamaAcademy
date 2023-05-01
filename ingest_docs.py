@@ -316,15 +316,18 @@ class IngestDocumentsTask(luigi.Task):
     logger = logging.getLogger(__name__)
 
     def output(self):
-        return luigi.LocalTarget("assets/documents_{}.pkl".format(self.task_id), luigi.LocalTarget("assets/docs_for_summary_{}.pkl".format(self.task_id)))
+        return {
+                'documents': luigi.LocalTarget("assets/documents_{}.pkl".format(self.task_id)),
+                'docs_for_summary': luigi.LocalTarget("assets/docs_for_summary_{}.pkl".format(self.task_id))
+                } 
 
     def run(self):
         self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
         self.logger.info(self.task_id)
         docs, docs_for_summary = ingest_docs(self.url_docs, self.recursive_depth, logger=self.logger)
-        with self.output()[0].open("wb") as f:
+        with self.output()['documents'].open("wb") as f:
             pickle.dump(docs, f)
-        with self.output()[1].open("wb") as f:
+        with self.output()['docs_for_summary'].open("wb") as f:
             pickle.dump(docs_for_summary, f)
 
 
@@ -347,6 +350,7 @@ class SaveVectorStoreTask(luigi.Task):
 
         with self.output().open("wb") as f:
             pickle.dump(vectorstore, f)
+
 
 if __name__ == "__main__":
     luigi.build([SaveVectorStoreTask("https://developers.notion.com/reference/create-a-token", recursive_depth=0)], local_scheduler=True)
