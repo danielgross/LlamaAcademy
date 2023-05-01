@@ -368,8 +368,8 @@ class IngestDocs(luigi.Task):
 
     def requires(self):
         return {
-            'ingest': IngestDocumentsTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth),
-            'save': SaveVectorStoreTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
+            'IngestDocumentsTask': IngestDocumentsTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth),
+            'SaveVectorStoreTask': SaveVectorStoreTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
         }
 
     def run(self):
