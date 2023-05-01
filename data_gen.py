@@ -15,7 +15,7 @@ import luigi
 from langchain.docstore.document import Document
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores.faiss import FAISS
-from ingest_docs import IngestDocs
+from ingest_docs import IngestDocs, INGEST_DOCUMENTS_TASK, SAVE_VECTOR_STORE_TASK, INGEST_DOCUMENTS_TASK__DOCUMENTS, INGEST_DOCUMENTS_TASK__DOCS_FOR_SUMMARY
 
 def post_process_response_ins(strategy, response, **kwargs):
     """
@@ -298,6 +298,7 @@ def launch_instruction_generation(
     temperature=0.7,
     top_p=0.7,
     logger=None,
+    vectorstore_summary_path="assets/vectorstore_summary.pkl"
     **kwargs
 ):
     request_idx = 0
@@ -325,7 +326,6 @@ def launch_instruction_generation(
         embed_docs = []
         summary_prompt = open("assets/prompt_summary.txt").read() + "\n"
         for _, doc in tqdm.tqdm(enumerate(kwargs["documents_for_summary"])):
-            import pdb;pdb.set_trace()
             summary = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": summary_prompt.format(passage=truncate(encoding_gpt3, doc.page_content, 3100))}],
@@ -338,7 +338,7 @@ def launch_instruction_generation(
         vectorstore = FAISS.from_documents(embed_docs, embeddings)
         
         logger.info("Summary Vectorstore is storing in assets/vectorstore_summary.pkl")
-        with open("assets/vectorstore_summary.pkl", "wb") as f:
+        with open(vectorstore_summary_path, "wb") as f:
             pickle.dump(vectorstore, f)
             
         logger.info("Summarizing mode ends")
@@ -578,6 +578,12 @@ def unit_test():
     )
 
 
+# --- luigi ---
+
+GENERATED_INSTRUCTIONS = 'generated_instructions'
+VECTORSTORE_SUMMARYY = 'vectorstore_summary'
+
+
 class LaunchInstructionGeneration(luigi.Task):
     url_docs = luigi.Parameter()
     output_dir = luigi.Parameter(default="assets/")
@@ -589,7 +595,10 @@ class LaunchInstructionGeneration(luigi.Task):
     documents_for_summary = luigi.Parameter()
 
     def output(self):
-        return luigi.LocalTarget(os.path.join(self.output_dir, "generated_instructions_{}.jsonl".format(self.task_id)))
+        return {
+                GENERATED_INSTRUCTIONS: luigi.LocalTarget(os.path.join(self.output_dir, "generated_instructions_{}.jsonl".format(self.task_id))),
+                VECTORSTORE_SUMMARY: luigi.LocalTarget(os.path.join(self.output_dir, "vectorstore_summary_{}.pkl".format(self.task_id))),
+                }
 
     def run(self):
         self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
@@ -600,10 +609,11 @@ class LaunchInstructionGeneration(luigi.Task):
             temperature=self.temperature,
             top_p=self.top_p,
             logger=self.logger,
-            documents_for_summary=self.documents_for_summary
+            documents_for_summary=self.documents_for_summary,
+            vectorstore_summary_path=self.output()[VECTORSTORE_SUMMARY].path
         )
 
-        with self.output().open("w") as f:
+        with self.output()[GENERATED_INSTRUCTIONS].open("w") as f:
             for instruction in generated_instructions:
                 f.write(json.dumps(instruction) + "\n")
 
@@ -618,7 +628,7 @@ class LaunchMachineOutputData(luigi.Task):
     logger = logging.getLogger(__name__)
 
     def output(self):
-        return luigi.LocalTarget("assets/data_{}.json".format(self.task_id))
+        return luigi.LocalTarget(os.path.join(self.output_dir, "assets/data_{}.json".format(self.task_id))
 
     def run(self):
         self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
@@ -653,53 +663,54 @@ class LaunchDataGeneration(luigi.Task):
     logger = logging.getLogger(__name__)
 
     def requires(self):
-        return IngestDocs(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
+        docs_ingestion_task = IngestDocs(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
+        instructions_generation_task = LaunchInstructionGeneration(url_docs=self.url_docs,
+                                                                   output_dir=self.output_dir,
+                                                                   num_tasks_to_generate=self.num_tasks_to_generate,
+                                                                   strategy_instruct=self.strategy_instruct,
+                                                                   temperature=self.temperature,
+                                                                   top_p=self.top_p,
+                                                                   documents_for_summary=None)
+        machine_output_task = LaunchMachineOutputData(documents_embeds=None,
+                                                      generated_instructions=None,
+                                                      model_name_code=self.model_name_code,
+                                                      url_docs=self.url_docs,
+                                                      use_scraped_docs=self.use_scraped_docs,
+                                                      num_docs_to_output=self.num_docs_to_output,
+                                                      max_tokens=self.max_tokens)
+        return {'docs_ingestion': docs_ingestion_task, 'instructions_generation': instructions_generation_task, 'machine_output': machine_output_task}
+
 
     def output(self):
-        return {
-            'generated_instructions': luigi.LocalTarget(os.path.join(self.output_dir, "generated_instructions.jsonl")),
-            'machine_output_data': luigi.LocalTarget(os.path.join(self.output_dir, "data.json"))
-        }
+        self.input()
 
     def run(self):
-        input_data = self.input() #{'ingest': {'documents': <luigi.local_target.LocalTarget object at 0x7f42cd538c70>, 'docs_for_summary': <luigi.local_target.LocalTarget object at 0x7f42cd538be0>}, 'save': <luigi.local_target.LocalTarget object at 0x7f42cd538b80>} 
-        import pdb;pdb.set_trace()
+        input_data = self.input()
 
-        documents_vectorstore = input_data['save'].path
-        docs_for_summary_loader = input_data['ingest']['docs_for_summary']
+        docs_for_summary_loader = input_data['docs_ingestion'][INGEST_DOCUMENTS_TASK][INGEST_DOCUMENTS_TASK__DOCS_FOR_SUMMARY]
         with docs_for_summary_loader.open("rb") as f:
             docs_for_summary = pickle.load(f)
 
-        task = LaunchInstructionGeneration(url_docs=self.url_docs,
-                                           output_dir=self.output_dir,
-                                           num_tasks_to_generate=self.num_tasks_to_generate,
-                                           strategy_instruct=self.strategy_instruct,
-                                           temperature=self.temperature,
-                                           top_p=self.top_p,
-                                           documents_for_summary=docs_for_summary,
-                                           )
+        task = self.input()['instructions_generation']
+        task.documents_for_summary = docs_for_summary
         yield task
 
         generated_instructions_path = task.output().path
+        self.logger.info("Completed Instruction Generation")
 
         with open(generated_instructions_path, "r") as f:
             generated_instructions = [json.loads(line.strip()) for line in f]
 
-        self.logger.info("Completed Instruction Generation")
+        documents_vectorstore_loader = input_data['docs_ingestion'][SAVE_VECTOR_STORE_TASK]
+        with documents_vectorstore_loader.open("rb") as f:
+            documents_vectorstore = pickle.load(f)
 
-        task = LaunchMachineOutputData(documents_embeds=documents_vectorstore,
-                                       generated_instructions=generated_instructions,
-                                       model_name_code=self.model_name_code,
-                                       url_docs=self.url_docs,
-                                       use_scraped_docs=self.use_scraped_docs,
-                                       num_docs_to_output=self.num_docs_to_output,
-                                       max_tokens=self.max_tokens)
+        task = self.input()['machine_output']
+        task.documents_embeds = documents_vectorstore
+        task.generated_instructions = generated_instructions
         yield task
 
-        machine_output_data_vicuna = task.output().path
-
         self.logger.info("Completed Machine Output Data Generation")
-
 
 
 

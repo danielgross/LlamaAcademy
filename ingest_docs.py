@@ -318,6 +318,13 @@ def ingest_docs(url_docs: str, recursive_depth: int = 1, return_summary: bool = 
     return documents, docs_for_summary
 
 
+# --- luigi ---
+INGEST_DOCUMENTS_TASK__DOCUMENTS = 'documents'
+INGEST_DOCUMENTS_TASK = 'IngestDocumentsTask'
+INGEST_DOCUMENTS_TASK__DOCS_FOR_SUMMARY = 'docs_for_summary'
+SAVE_VECTOR_STORE_TASK = 'SaveVectorStoreTask'
+
+
 class IngestDocumentsTask(luigi.Task):
     url_docs = luigi.Parameter()
     recursive_depth = luigi.IntParameter(default=1)
@@ -327,17 +334,17 @@ class IngestDocumentsTask(luigi.Task):
 
     def output(self):
         return {
-                'documents': luigi.LocalTarget("assets/documents_{}.pkl".format(self.task_id), format=luigi.format.Nop),
-                'docs_for_summary': luigi.LocalTarget("assets/docs_for_summary_{}.pkl".format(self.task_id), format=luigi.format.Nop)
+                INGEST_DOCUMENTS_TASK__DOCUMENTS: luigi.LocalTarget("assets/documents_{}.pkl".format(self.task_id), format=luigi.format.Nop),
+                INGEST_DOCUMENTS_TASK__DOCS_FOR_SUMMARY: luigi.LocalTarget("assets/docs_for_summary_{}.pkl".format(self.task_id), format=luigi.format.Nop)
                 } 
 
     def run(self):
         self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
         self.logger.info(self.task_id)
         docs, docs_for_summary = ingest_docs(self.url_docs, self.recursive_depth, logger=self.logger)
-        with self.output()['documents'].open("wb") as f:
+        with self.output()[INGEST_DOCUMENTS_TASK__DOCUMENTS].open("wb") as f:
             pickle.dump(docs, f)
-        with self.output()['docs_for_summary'].open("wb") as f:
+        with self.output()[INGEST_DOCUMENTS_TASK__DOCS_FOR_SUMMARY].open("wb") as f:
             pickle.dump(docs_for_summary, f)
 
 
@@ -353,7 +360,7 @@ class SaveVectorStoreTask(luigi.Task):
                 
     def run(self):
         self.logger.info(self.task_id)
-        with self.input()['documents'].open("rb") as f:
+        with self.input()[INGEST_DOCUMENTS_TASK__DOCUMENTS].open("rb") as f:
             docs = pickle.load(f)
 
         embeddings = OpenAIEmbeddings()
@@ -368,8 +375,8 @@ class IngestDocs(luigi.Task):
 
     def requires(self):
         return {
-            'IngestDocumentsTask': IngestDocumentsTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth),
-            'SaveVectorStoreTask': SaveVectorStoreTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
+            INGEST_DOCUMENTS_TASK: IngestDocumentsTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth),
+            SAVE_VECTOR_STORE_TASK: SaveVectorStoreTask(url_docs=self.url_docs, recursive_depth=self.recursive_depth)
         }
 
     def run(self):
