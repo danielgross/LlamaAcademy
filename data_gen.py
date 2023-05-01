@@ -1,4 +1,5 @@
 import os
+import logging
 import time
 import utils
 import json
@@ -14,7 +15,7 @@ import luigi
 from langchain.docstore.document import Document
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores.faiss import FAISS
-from ingest_docs import IngestDocumentsTask, SaveVectorStoreTask
+from ingest_docs import IngestDocs
 
 def post_process_response_ins(strategy, response, **kwargs):
     """
@@ -324,6 +325,7 @@ def launch_instruction_generation(
         embed_docs = []
         summary_prompt = open("assets/prompt_summary.txt").read() + "\n"
         for _, doc in tqdm.tqdm(enumerate(kwargs["documents_for_summary"])):
+            import pdb;pdb.set_trace()
             summary = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": summary_prompt.format(passage=truncate(encoding_gpt3, doc.page_content, 3100))}],
@@ -584,11 +586,13 @@ class LaunchInstructionGeneration(luigi.Task):
     temperature = luigi.FloatParameter(default=0.7)
     top_p = luigi.FloatParameter(default=1.0)
     logger = logging.getLogger(__name__)
+    documents_for_summary = luigi.Parameter()
 
     def output(self):
-        return luigi.LocalTarget(os.path.join(self.output_dir, "generated_instructions.jsonl"))
+        return luigi.LocalTarget(os.path.join(self.output_dir, "generated_instructions_{}.jsonl".format(self.task_id)))
 
     def run(self):
+        self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
         generated_instructions = launch_instruction_generation(
             url_docs=self.url_docs,
             strategy=self.strategy_instruct,
@@ -596,6 +600,7 @@ class LaunchInstructionGeneration(luigi.Task):
             temperature=self.temperature,
             top_p=self.top_p,
             logger=self.logger,
+            documents_for_summary=self.documents_for_summary
         )
 
         with self.output().open("w") as f:
@@ -613,9 +618,10 @@ class LaunchMachineOutputData(luigi.Task):
     logger = logging.getLogger(__name__)
 
     def output(self):
-        return luigi.LocalTarget("assets/data.json")
+        return luigi.LocalTarget("assets/data_{}.json".format(self.task_id))
 
     def run(self):
+        self.task_id  = luigi.task.task_id_str(self.get_task_family(), self.to_str_params())
         machine_output_data = generate_machine_output_data(
             generated_instructions=self.generated_instructions,
             documents_embeds=self.documents_embeds,
@@ -656,16 +662,22 @@ class LaunchDataGeneration(luigi.Task):
         }
 
     def run(self):
-        input_data = self.input()
+        input_data = self.input() #{'ingest': {'documents': <luigi.local_target.LocalTarget object at 0x7f42cd538c70>, 'docs_for_summary': <luigi.local_target.LocalTarget object at 0x7f42cd538be0>}, 'save': <luigi.local_target.LocalTarget object at 0x7f42cd538b80>} 
         import pdb;pdb.set_trace()
-        documents_embeds = input_data['save'].path
+
+        documents_vectorstore = input_data['save'].path
+        docs_for_summary_loader = input_data['ingest']['docs_for_summary']
+        with docs_for_summary_loader.open("rb") as f:
+            docs_for_summary = pickle.load(f)
 
         task = LaunchInstructionGeneration(url_docs=self.url_docs,
                                            output_dir=self.output_dir,
                                            num_tasks_to_generate=self.num_tasks_to_generate,
                                            strategy_instruct=self.strategy_instruct,
                                            temperature=self.temperature,
-                                           top_p=self.top_p)
+                                           top_p=self.top_p,
+                                           documents_for_summary=docs_for_summary,
+                                           )
         yield task
 
         generated_instructions_path = task.output().path
@@ -675,7 +687,7 @@ class LaunchDataGeneration(luigi.Task):
 
         self.logger.info("Completed Instruction Generation")
 
-        task = LaunchMachineOutputData(documents_embeds=documents_embeds,
+        task = LaunchMachineOutputData(documents_embeds=documents_vectorstore,
                                        generated_instructions=generated_instructions,
                                        model_name_code=self.model_name_code,
                                        url_docs=self.url_docs,
@@ -692,4 +704,8 @@ class LaunchDataGeneration(luigi.Task):
 
 
 if __name__ == "__main__":
-    unit_test()
+    task = LaunchDataGeneration(
+            url_docs='https://developers.notion.com/reference',
+            recursive_depth=1,
+        )
+    luigi.build([task], local_scheduler=True)
