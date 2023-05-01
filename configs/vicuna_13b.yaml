@@ -1,4 +1,4 @@
-GENERATE: True #Turn off if you don't want to generate the data
+GENERATE: False #Turn off if you don't want to generate the data
 API_DOCS: https://developers.notion.com/reference  
 DEPTH_CRAWLING: 1 #0 if your API website is long and not hierarchical for example like polygon.io. Otherwise, feel free to set, it might take much longer if your webiste has many children.
 SUMMARIZE_DOCS: True
