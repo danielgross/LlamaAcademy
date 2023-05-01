@@ -317,8 +317,8 @@ class IngestDocumentsTask(luigi.Task):
 
     def output(self):
         return {
-                'documents': luigi.LocalTarget("assets/documents_{}.pkl".format(self.task_id)),
-                'docs_for_summary': luigi.LocalTarget("assets/docs_for_summary_{}.pkl".format(self.task_id))
+                'documents': luigi.LocalTarget("assets/documents_{}.pkl".format(self.task_id), format=luigi.format.Nop),
+                'docs_for_summary': luigi.LocalTarget("assets/docs_for_summary_{}.pkl".format(self.task_id), format=luigi.format.Nop)
                 } 
 
     def run(self):
@@ -333,16 +333,17 @@ class IngestDocumentsTask(luigi.Task):
 
 @inherits(IngestDocumentsTask)
 class SaveVectorStoreTask(luigi.Task):
+    logger = logging.getLogger(__name__)
 
     def requires(self):
         return self.clone(IngestDocumentsTask)
 
     def output(self):
-        return luigi.LocalTarget("assets/vectorstore_{}.pkl".format(self.task_id))
-
+        return luigi.LocalTarget("assets/vectorstore_{}.pkl".format(self.task_id), format=luigi.format.Nop)
+                
     def run(self):
         self.logger.info(self.task_id)
-        with self.input()[0].open("rb") as f:
+        with self.input()['documents'].open("rb") as f:
             docs = pickle.load(f)
 
         embeddings = OpenAIEmbeddings()
